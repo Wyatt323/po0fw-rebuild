@@ -1,13 +1,15 @@
-name: po0 防火墙自动加白
-description: 调用 po0 防火墙 API 将本机当前出口 IP 加入白名单。支持多 token（英文逗号分割，一台机器一个），每 10 分钟 cron 与网络变化时自动加白。加白 API 走直连。可选：token 后加 @槽位（如 pgnfw_xxx@0）钉固定坑位、永不被淘汰。
+name: po0 防火墙自动加白 · Rebuild
+description: 调用 po0 防火墙 API 将本机当前出口 IP 加入白名单。支持多 token（英文逗号分割，一台机器一个），每 10 分钟 cron 与网络变化时自动加白。加白 API 走直连。可选：token 后加 @槽位（如 pgnfw_xxx@0）钉固定坑位、永不被淘汰。 支持指定软路由 Wi-Fi 后仅加白一次。
 author: reallinzc
-homepage: https://po0fw.uuuz.de/
+homepage: https://github.com/Wyatt323/po0fw-rebuild
 icon: https://po0fw.uuuz.de/icons/po0fw.png
 
 # 安装后在模块参数 tokens 填入 pgnfw_ token（多台机器用英文逗号分割）。
 # 可选：token 后加 @槽位（如 pgnfw_xxx@0）把本机 IP 钉在该坑位、永不被 LRU 淘汰。
 compat_arguments:
   tokens: ""
+  home_ssid: ""
+  home_gateway: ""
 
 # 加白 API 必须直连，确保服务端看到的是本机真实出口 IP 而不是代理出口
 rules:
@@ -20,13 +22,19 @@ scriptings:
   - schedule:
       name: po0-fw-cron
       cron: "*/10 * * * *"
-      script_url: https://raw.githubusercontent.com/w0ven/po0fw/main/egern/po0-firewall-whitelist.js
+      script_url: https://raw.githubusercontent.com/Wyatt323/po0fw-rebuild/main/egern/po0-firewall-whitelist.js
+      update_interval: 300
       timeout: 60
       env:
         tokens: "{{{tokens}}}"
+        home_ssid: "{{{home_ssid}}}"
+        home_gateway: "{{{home_gateway}}}"
   - network:
       name: po0-fw-network
-      script_url: https://raw.githubusercontent.com/w0ven/po0fw/main/egern/po0-firewall-whitelist.js
+      script_url: https://raw.githubusercontent.com/Wyatt323/po0fw-rebuild/main/egern/po0-firewall-whitelist.js
+      update_interval: 300
       timeout: 60
       env:
         tokens: "{{{tokens}}}"
+        home_ssid: "{{{home_ssid}}}"
+        home_gateway: "{{{home_gateway}}}"

@@ -1,3 +1,32 @@
+<!-- po0fw-rebuild: Egern -->
+# po0fw-rebuild · Egern 增强版
+
+基于 [w0ven/po0fw](https://github.com/w0ven/po0fw) 修改，保留原作者及贡献者署名，遵循原项目 [MIT License](LICENSE)。感谢 w0ven、reallinzc 与所有贡献者。此为非官方增强版。
+
+## Egern 安装
+
+模块地址：`https://raw.githubusercontent.com/Wyatt323/po0fw-rebuild/main/egern/po0-firewall-whitelist.yaml`
+
+| 参数 | 说明 |
+| --- | --- |
+| tokens | 原版 Token，支持多 Token 和固定槽位，请勿公开真实凭证 |
+| home_ssid | 指定软路由 Wi-Fi 名称，多个用逗号分隔 |
+| home_gateway | 手机实际获取的 IPv4 默认网关，可用逗号分隔多个 |
+
+两个 home 参数均留空时保持原版行为。填写两个时须同时匹配；网关单独匹配也要求系统报告 Wi-Fi，推荐同时配置 SSID 与网关。
+
+- 进入指定软路由 Wi-Fi：网络变化任务执行一次加白（保留原版内部重试）。同一次访问中重复网络事件直接退出。
+- 家中定时任务直接退出，不请求 API。后续由软路由维护白名单。
+- 离开指定 Wi-Fi：恢复原版定时与网络变化加白，并清除访问状态。
+- 首次安装或参数修改后建议切换一次网络；若首次加白失败，可离开后重新连接以重试。
+- 定时任务仍会唤醒脚本；不会关闭 Egern 的定时调度本身。
+
+## 自动同步
+
+GitHub Actions 每 5 分钟检测上游 main 的 Egern JS/YAML。获取同一上游提交后重新应用本工作流内的增强补丁，运行模拟网络测试与 YAML 验证。仅在变更且测试通过时提交；上游接口变化导致补丁失败时保留上一版。其他平台文件保留 Fork 版本，不参与该工作流。GitHub 定时任务可能延迟；Fork 必须启用 Actions 并允许写入仓库。脚本更新间隔 300 秒，模块自身刷新由客户端决定。未进行 iOS 真机测试。
+
+---
+
 <div align="center">
   <img src="docs/icons/po0fw.png" width="76" height="76" alt="po0fw logo" />
   <h1>po0fw</h1>

@@ -261,6 +261,33 @@ function describe(ctx, index, c) {
   return head + "✅ " + list.length + "/" + limit + "\n    " + ips;
 }
 
+// po0fw-rebuild: one whitelist attempt per home-network visit.
+function shouldSkipHomeWhitelist(ctx) {
+  const env = ctx.env || {};
+  const d = ctx.device || {};
+  const split = value => String(value || '').split(/[,，|]/).map(s => s.trim()).filter(Boolean);
+  const ssids = split(env.home_ssid);
+  const gateways = split(env.home_gateway);
+  const ssid = (d.wifi || {}).ssid || '';
+  const gateway = (d.ipv4 || {}).gateway || '';
+  const onWifi = !!(ssid || (d.wifi || {}).bssid);
+  const home = (ssids.length || gateways.length) && onWifi &&
+    (!ssids.length || ssids.includes(ssid)) &&
+    (!gateways.length || gateways.includes(gateway));
+  const key = 'po0_fw_rebuild_home_visit_v1';
+  if (!home) {
+    ctx.storage.delete(key);
+    return false;
+  }
+  if (ctx.cron || (ctx.script || {}).name === 'po0-fw-cron') return true;
+  const visit = JSON.stringify([ssids, gateways]);
+  if (ctx.storage.get(key) === visit) return true;
+  // Record before HTTP to suppress repeated network events.
+  // Original per-token retry logic is unchanged.
+  ctx.storage.set(key, visit);
+  return false;
+}
+
 export default async function (ctx) {
   try {
     const tokens = parseTokens(ctx.env && ctx.env.tokens);
@@ -273,6 +300,7 @@ export default async function (ctx) {
       return;
     }
 
+    if (shouldSkipHomeWhitelist(ctx)) return;
     const cellular = onCellular(ctx);
     const results = await Promise.all(
       tokens.map(function (t, i) {
