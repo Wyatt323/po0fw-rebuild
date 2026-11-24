@@ -1,3 +1,67 @@
+name: Sync upstream Egern
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/sync-upstream.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-egern
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'Wyatt323/po0fw-rebuild'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch upstream Egern from one commit
+        run: |
+          git fetch --no-tags --depth=1 https://github.com/w0ven/po0fw.git main
+          upstream="$(git rev-parse FETCH_HEAD)"
+          mkdir -p "$RUNNER_TEMP/upstream-egern"
+          for file in po0-firewall-whitelist.js po0-firewall-whitelist.yaml; do
+            git show "$upstream:egern/$file" > "$RUNNER_TEMP/upstream-egern/$file"
+          done
+          echo "UPSTREAM_SHA=$upstream" >> "$GITHUB_ENV"
+      - name: Apply Egern home-network patch
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP']) / 'upstream-egern'
+          dest = Path('egern')
+          dest.mkdir(exist_ok=True)
+          js_name = 'po0-firewall-whitelist.js'
+          yaml_name = 'po0-firewall-whitelist.yaml'
+          helper = r'''// po0fw-rebuild: one whitelist attempt per home-network visit.
+          function shouldSkipHomeWhitelist(ctx) {
+            const env = ctx.env || {};
+            const d = ctx.device || {};
+            const split = value => String(value || '').split(/[,，|]/).map(s => s.trim()).filter(Boolean);
+            const ssids = split(env.home_ssid);
+            const gateways = split(env.home_gateway);
+            const ssid = (d.wifi || {}).ssid || '';
+            const gateway = (d.ipv4 || {}).gateway || '';
+            const onWifi = !!(ssid || (d.wifi || {}).bssid);
+            const home = (ssids.length || gateways.length) && onWifi &&
+              (!ssids.length || ssids.includes(ssid)) &&
+              (!gateways.length || gateways.includes(gateway));
+            const key = 'po0_fw_rebuild_home_visit_v1';
+            if (!home) {
+              ctx.storage.delete(key);
+              return false;
+            }
+            if (ctx.cron || (ctx.script || {}).name === 'po0-fw-cron') return true;
             const visit = JSON.stringify([ssids, gateways]);
             if (ctx.storage.get(key) === visit) return true;
             // Record before HTTP to suppress repeated network events.
