@@ -1,0 +1,124 @@
+            const visit = JSON.stringify([ssids, gateways]);
+            if (ctx.storage.get(key) === visit) return true;
+            // Record before HTTP to suppress repeated network events.
+            // Original per-token retry logic is unchanged.
+            ctx.storage.set(key, visit);
+            return false;
+          }
+          '''
+          def replace_exact(text, old, new, count=1):
+              if text.count(old) != count:
+                  raise RuntimeError('Upstream changed; inspect anchor: ' + repr(old))
+              return text.replace(old, new)
+          js = (source / js_name).read_text(encoding='utf-8')
+          y = (source / yaml_name).read_text(encoding='utf-8')
+          js = replace_exact(js, 'export default async function (ctx) {', helper + '\nexport default async function (ctx) {')
+          js = replace_exact(js, '    const cellular = onCellular(ctx);', '    if (shouldSkipHomeWhitelist(ctx)) return;\n    const cellular = onCellular(ctx);')
+          y = replace_exact(y, '  tokens: ""', '  tokens: ""\n  home_ssid: ""\n  home_gateway: ""')
+          y = replace_exact(y, '        tokens: "{{{tokens}}}"', '        tokens: "{{{tokens}}}"\n        home_ssid: "{{{home_ssid}}}"\n        home_gateway: "{{{home_gateway}}}"', 2)
+          y = replace_exact(y, 'https://raw.githubusercontent.com/w0ven/po0fw/main/egern/po0-firewall-whitelist.js', 'https://raw.githubusercontent.com/Wyatt323/po0fw-rebuild/main/egern/po0-firewall-whitelist.js', 2)
+          y = replace_exact(y, 'name: po0 防火墙自动加白\n', 'name: po0 防火墙自动加白 · Rebuild\n')
+          y = replace_exact(y, '\nauthor:', ' 支持指定软路由 Wi-Fi 后仅加白一次。\nauthor:')
+          y = replace_exact(y, 'homepage: https://po0fw.uuuz.de/', 'homepage: https://github.com/Wyatt323/po0fw-rebuild')
+          y = replace_exact(y, '      timeout: 60', '      update_interval: 300\n      timeout: 60', 2)
+          (dest / js_name).write_text(js, encoding='utf-8')
+          (dest / yaml_name).write_text(y, encoding='utf-8')
+          readme = Path('README.md')
+          old = readme.read_text(encoding='utf-8')
+          marker = '<!-- po0fw-rebuild: Egern -->'
+          if marker not in old:
+              intro = '''<!-- po0fw-rebuild: Egern -->
+          # po0fw-rebuild · Egern 增强版
+
+          基于 [w0ven/po0fw](https://github.com/w0ven/po0fw) 修改，保留原作者及贡献者署名，遵循原项目 [MIT License](LICENSE)。感谢 w0ven、reallinzc 与所有贡献者。此为非官方增强版。
+
+          ## Egern 安装
+
+          模块地址：`https://raw.githubusercontent.com/Wyatt323/po0fw-rebuild/main/egern/po0-firewall-whitelist.yaml`
+
+          | 参数 | 说明 |
+          | --- | --- |
+          | tokens | 原版 Token，支持多 Token 和固定槽位，请勿公开真实凭证 |
+          | home_ssid | 指定软路由 Wi-Fi 名称，多个用逗号分隔 |
+          | home_gateway | 手机实际获取的 IPv4 默认网关，可用逗号分隔多个 |
+
+          两个 home 参数均留空时保持原版行为。填写两个时须同时匹配；网关单独匹配也要求系统报告 Wi-Fi，推荐同时配置 SSID 与网关。
+
+          - 进入指定软路由 Wi-Fi：网络变化任务执行一次加白（保留原版内部重试）。同一次访问中重复网络事件直接退出。
+          - 家中定时任务直接退出，不请求 API。后续由软路由维护白名单。
+          - 离开指定 Wi-Fi：恢复原版定时与网络变化加白，并清除访问状态。
+          - 首次安装或参数修改后建议切换一次网络；若首次加白失败，可离开后重新连接以重试。
+          - 定时任务仍会唤醒脚本；不会关闭 Egern 的定时调度本身。
+
+          ## 自动同步
+
+          GitHub Actions 每 5 分钟检测上游 main 的 Egern JS/YAML。获取同一上游提交后重新应用本工作流内的增强补丁，运行模拟网络测试与 YAML 验证。仅在变更且测试通过时提交；上游接口变化导致补丁失败时保留上一版。其他平台文件保留 Fork 版本，不参与该工作流。GitHub 定时任务可能延迟；Fork 必须启用 Actions 并允许写入仓库。脚本更新间隔 300 秒，模块自身刷新由客户端决定。未进行 iOS 真机测试。
+
+          ---
+
+          '''
+              readme.write_text(intro + old, encoding='utf-8')
+          PY
+      - name: Test network behavior and configuration
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const source=readFileSync('egern/po0-firewall-whitelist.js','utf8');
+          const {default:run}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+          const store=new Map();
+          const storage={get:k=>store.get(k)??null,set:(k,v)=>store.set(k,v),delete:k=>store.delete(k),getJSON:k=>JSON.parse(store.get(k)??'null'),setJSON:(k,v)=>store.set(k,JSON.stringify(v))};
+          let calls=0;
+          const home={wifi:{ssid:'Home',bssid:'aa'},ipv4:{gateway:'192.168.1.2'}};
+          const mobile={wifi:{ssid:null},cellular:{carrier:'test',radio:'5G'},ipv4:{gateway:'192.168.1.2'}};
+          const away={wifi:{ssid:'Away'},ipv4:{gateway:'192.168.1.2'}};
+          const wrong={wifi:{ssid:'Home'},ipv4:{gateway:'192.168.1.1'}};
+          const base={tokens:'pgnfw_test',home_ssid:'Home',home_gateway:'192.168.1.2'};
+          async function check(device,cron,expected,env=base) {
+            const before=calls;
+            await run({env,device,storage,cron:cron?'*/10 * * * *':undefined,script:{name:cron?'po0-fw-cron':'po0-fw-network'},http:{post:async()=>{calls++;return {status:200,text:async()=>JSON.stringify({enabled:true,currentIp:'203.0.113.0/24',whitelist:[{ip:'203.0.113.0/24',slot:null}]})}}},notify:()=>{}});
+            assert.equal(calls-before,expected);
+          }
+          await check(home,false,1);
+          await check(home,false,0);
+          await check(home,true,0);
+          await check(mobile,false,1);
+          await check(mobile,true,1);
+          await check(home,false,1);
+          await check(home,true,0);
+          await check(away,false,1);
+          await check(away,true,1);
+          await check(wrong,false,1);
+          await check(home,false,1);
+          await check(home,true,0);
+          await check(home,true,1,{tokens:'pgnfw_test'});
+          await check(home,false,1,{...base,home_gateway:''});
+          await check(home,true,0,{...base,home_gateway:''});
+          await check(mobile,false,1,{...base,home_ssid:''});
+          await check(home,false,1,{...base,home_ssid:''});
+          await check(home,true,0,{...base,home_ssid:''});
+          console.log('Egern home-network tests passed');
+          JS
+          python -m pip install --quiet PyYAML==6.0.2
+          python - <<'PY'
+          import yaml
+          with open('egern/po0-firewall-whitelist.yaml') as f:
+              d = yaml.safe_load(f)
+          assert all(k in d['compat_arguments'] for k in ('tokens','home_ssid','home_gateway'))
+          assert len(d['scriptings']) == 2
+          for item in d['scriptings']:
+              s = next(iter(item.values()))
+              assert s['script_url'] == 'https://raw.githubusercontent.com/Wyatt323/po0fw-rebuild/main/egern/po0-firewall-whitelist.js'
+              assert all(k in s['env'] for k in ('tokens','home_ssid','home_gateway'))
+          PY
+      - name: Publish only verified files
+        run: |
+          git add egern/po0-firewall-whitelist.js egern/po0-firewall-whitelist.yaml README.md
+          if git diff --cached --quiet; then
+            echo 'No Egern changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "Sync upstream Egern $UPSTREAM_SHA and retain home-network guard"
+          git push origin HEAD:main
